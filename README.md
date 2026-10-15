@@ -1,18 +1,25 @@
 # Mess Management System
 
-A browser-based app for managing meal records, shared expenses, deposits, settlements, and household bills.
+A browser app for managing meal records, shared expenses, deposits, settlements, and household bills. The ledger is saved in Neon Postgres and shared across signed-in devices.
 
-Built with React, TypeScript, Tailwind CSS, and Vite.
+Built with React, TypeScript, Tailwind CSS, Vite, Vercel Functions, and Neon Postgres.
 
-## Setup
+## Deployment
 
-Prerequisites: Node.js and pnpm.
+The Vercel project should have these server-side environment variables:
 
-1. Run `pnpm install`.
-2. Copy `env.example` to `.env.local`.
-3. Set `VITE_ADMIN_USER_ID` and `VITE_ADMIN_PASSWORD` in `.env.local`.
-4. Run `pnpm dev` for local development or `pnpm build` for a production build.
+- `DATABASE_URL` from the Neon integration
+- `VITE_ADMIN_USER_ID` and `VITE_ADMIN_PASSWORD` for the admin login
 
-The initial ledger is empty. Enter your own records after launching the app.
+Set the admin values in Vercel project settings and keep them server-side. The API reads them through `process.env`; the browser bundle does not include the credentials. The Neon integration supplies `DATABASE_URL` to the Vercel project.
 
-The admin login is a browser-side gate. Vite embeds configured values in the client build, so use server-backed authentication to protect sensitive information.
+## Local development
+
+Prerequisites: Node.js 20 or newer, npm, and the Vercel CLI.
+
+1. Run `npm install`.
+2. Copy `env.example` to `.env.local` and fill in the server-side credentials and Neon connection string.
+3. Run `vercel dev` to use the app with its API routes, or `npm run build` to build the frontend.
+
+The ledger starts empty. The first signed-in browser with existing local records uploads those records when the cloud ledger is empty. After that, signed-in devices load and save the shared cloud ledger.
+

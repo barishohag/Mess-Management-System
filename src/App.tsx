@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   AppTab, 
   Member, 
@@ -133,6 +133,12 @@ export default function App() {
     return saved !== null ? JSON.parse(saved) : true;
   });
 
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState('Connecting to cloud storage…');
+  const lastCloudUpdate = useRef<string | null>(null);
+  const lastLocalEdit = useRef(0);
+  const skipNextCloudWrite = useRef(false);
+
   // Sync to local storage
   useEffect(() => {
     localStorage.setItem('mess_members_v2', JSON.stringify(members));
@@ -171,8 +177,140 @@ export default function App() {
   const [selectedMemberId, setSelectedMemberId] = useState<string>(members[0]?.id || 'm1');
 
   // Admin Session State
-  const [adminSession, setAdminSession] = useState<AdminSession | null>(() => getAdminSession());
+  const [adminSession, setAdminSession] = useState<AdminSession | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getAdminSession().then((session) => {
+      if (!active) return;
+      setAdminSession(session);
+      setAuthChecked(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const makeLedgerSnapshot = () => ({
+    members,
+    expenses,
+    deposits,
+    dailyMeals,
+    settledMemberIds: Array.from(settledMemberIds),
+    dormBills,
+    dormPayments,
+    includeMealAdjustment,
+    activePeriod
+  });
+
+  const applyLedgerSnapshot = (data: any) => {
+    if (!data || typeof data !== 'object') return;
+    skipNextCloudWrite.current = true;
+    if (Array.isArray(data.members)) setMembers(data.members);
+    if (Array.isArray(data.expenses)) setExpenses(data.expenses);
+    if (Array.isArray(data.deposits)) setDeposits(data.deposits);
+    if (Array.isArray(data.dailyMeals)) setDailyMeals(data.dailyMeals);
+    if (Array.isArray(data.settledMemberIds)) setSettledMemberIds(new Set(data.settledMemberIds));
+    if (Array.isArray(data.dormBills)) setDormBills(data.dormBills);
+    if (Array.isArray(data.dormPayments)) setDormPayments(data.dormPayments);
+    if (typeof data.includeMealAdjustment === 'boolean') setIncludeMealAdjustment(data.includeMealAdjustment);
+    if (typeof data.activePeriod === 'string') setActivePeriod(data.activePeriod);
+  };
+
+  useEffect(() => {
+    if (!adminSession) {
+      setCloudReady(false);
+      setCloudStatus('Sign in to connect cloud storage');
+      return;
+    }
+
+    let active = true;
+    setCloudReady(false);
+    setCloudStatus('Loading your shared ledger…');
+
+    const connect = async () => {
+      try {
+        const response = await fetch('/api/state', { credentials: 'same-origin', cache: 'no-store' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Cloud storage is unavailable.');
+
+        if (result.data) {
+          lastCloudUpdate.current = result.updatedAt;
+          applyLedgerSnapshot(result.data);
+        } else {
+          const saveResponse = await fetch('/api/state', {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: makeLedgerSnapshot() })
+          });
+          const saved = await saveResponse.json();
+          if (!saveResponse.ok) throw new Error(saved.message || 'Could not initialize cloud storage.');
+          lastCloudUpdate.current = saved.updatedAt;
+        }
+
+        if (!active) return;
+        setCloudReady(true);
+        setCloudStatus('Cloud ledger connected');
+      } catch (error) {
+        if (!active) return;
+        setCloudReady(false);
+        setCloudStatus(error instanceof Error ? error.message : 'Cloud storage is not connected.');
+      }
+    };
+
+    void connect();
+    return () => { active = false; };
+  }, [adminSession]);
+
+  useEffect(() => {
+    if (!cloudReady || !adminSession) return;
+
+    const timer = window.setTimeout(async () => {
+      if (skipNextCloudWrite.current) {
+        skipNextCloudWrite.current = false;
+        return;
+      }
+      lastLocalEdit.current = Date.now();
+      setCloudStatus('Saving to cloud…');
+      try {
+        const response = await fetch('/api/state', {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: makeLedgerSnapshot() })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Cloud save failed.');
+        lastCloudUpdate.current = result.updatedAt;
+        setCloudStatus('All changes saved to cloud');
+      } catch (error) {
+        setCloudStatus(error instanceof Error ? error.message : 'Cloud save failed.');
+      }
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [cloudReady, adminSession, members, expenses, deposits, dailyMeals, settledMemberIds, dormBills, dormPayments, includeMealAdjustment, activePeriod]);
+
+  useEffect(() => {
+    if (!cloudReady || !adminSession) return;
+    const timer = window.setInterval(async () => {
+      if (Date.now() - lastLocalEdit.current < 2000) return;
+      try {
+        const response = await fetch('/api/state', { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (!result.data || !result.updatedAt || result.updatedAt === lastCloudUpdate.current) return;
+        skipNextCloudWrite.current = true;
+        lastCloudUpdate.current = result.updatedAt;
+        applyLedgerSnapshot(result.data);
+        setCloudStatus('Updated from another device');
+      } catch {
+        setCloudStatus('Waiting for cloud connection…');
+      }
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [cloudReady, adminSession]);
 
   // Modal States
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
@@ -542,6 +680,14 @@ export default function App() {
     }
   };
 
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-600 text-sm">
+        Restoring secure admin session…
+      </div>
+    );
+  }
+
   if (!adminSession) {
     return (
       <AdminLoginModal
@@ -699,6 +845,8 @@ export default function App() {
             <span className="font-semibold text-slate-800">Mess Meal Management System</span>
             <span>·</span>
             <span>Automated Meal Tracking, Bazaar & Dormitory Flat Bill Accounting</span>
+            <span>·</span>
+            <span>{cloudStatus}</span>
           </div>
 
           <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
@@ -867,3 +1015,4 @@ export default function App() {
     </div>
   );
 }
+

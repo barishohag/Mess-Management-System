@@ -10,17 +10,13 @@ import {
   MemberSettlement,
   DormitorySummary,
   AdminSession,
-  AdminCredentials,
   AdminAuditLog
 } from '../types';
 import { 
   loginAdmin, 
   logoutAdmin, 
-  getAdminCredentials, 
-  saveAdminCredentials, 
   getAdminLogs, 
-  logAdminAction, 
-  DEFAULT_ADMIN_CREDENTIALS 
+  logAdminAction
 } from '../utils/adminAuth';
 import { formatTk, formatNumber } from '../utils/calculator';
 import { 
@@ -111,12 +107,12 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   // Active Admin Sub-Tab
   const [activeAdminTab, setActiveAdminTab] = useState<'roster' | 'audit' | 'security' | 'backup'>('roster');
 
-  // Change Credentials Form States
-  const [currentCreds, setCurrentCreds] = useState<AdminCredentials>(() => getAdminCredentials());
-  const [newUserId, setNewUserId] = useState(currentCreds.userId);
-  const [newDisplayName, setNewDisplayName] = useState(currentCreds.displayName);
-  const [newPassword, setNewPassword] = useState(currentCreds.passwordHash);
-  const [credsSuccessMsg, setCredsSuccessMsg] = useState('');
+  const currentCreds = {
+    userId: adminSession?.userId || '',
+    displayName: adminSession?.displayName || 'Mess Manager',
+    role: (adminSession?.role || 'Super Admin') as 'Super Admin' | 'Mess Manager' | 'Auditor',
+    passwordHash: ''
+  };
 
   // Editable Member State in Admin Roster
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
@@ -132,7 +128,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   };
 
   // 1. Handle Login
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
 
@@ -146,55 +142,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     }
 
     setIsLoggingIn(true);
-    setTimeout(() => {
-      const res = loginAdmin(loginUserId, loginPassword);
-      setIsLoggingIn(false);
-
-      if (res.success && res.session) {
-        onLoginSuccess(res.session);
-        setLoginUserId('');
-        setLoginPassword('');
-      } else {
-        setLoginError(res.message || 'Invalid User ID or Password.');
-      }
-    }, 200);
-  };
-
-  const handleQuickFill = () => {
-    const creds = getAdminCredentials();
-    setLoginUserId(creds.userId);
-    setLoginPassword(creds.passwordHash);
-    setLoginError('');
-  };
-
-  // 2. Handle Change Admin Credentials
-  const handleSaveCredentials = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newUserId.trim()) return;
-    if (!newPassword.trim()) return;
-
-    const updated: AdminCredentials = {
-      ...currentCreds,
-      userId: newUserId.trim(),
-      displayName: newDisplayName.trim() || 'Mess Manager',
-      passwordHash: newPassword.trim(),
-      updatedAt: new Date().toISOString()
-    };
-
-    saveAdminCredentials(updated);
-    setCurrentCreds(updated);
-    setCredsSuccessMsg('Admin credentials updated successfully! Use these new details on your next login.');
-    setTimeout(() => setCredsSuccessMsg(''), 4000);
-  };
-
-  const handleResetCredsToDefault = () => {
-    if (window.confirm('Reset admin credentials to the configured environment values?')) {
-      saveAdminCredentials(DEFAULT_ADMIN_CREDENTIALS);
-      setCurrentCreds(DEFAULT_ADMIN_CREDENTIALS);
-      setNewUserId(DEFAULT_ADMIN_CREDENTIALS.userId);
-      setNewDisplayName(DEFAULT_ADMIN_CREDENTIALS.displayName);
-      setNewPassword(DEFAULT_ADMIN_CREDENTIALS.passwordHash);
-      showTemporaryNotice('Admin credentials reset to the configured environment values.');
+    const res = await loginAdmin(loginUserId, loginPassword);
+    setIsLoggingIn(false);
+    if (res.success && res.session) {
+      onLoginSuccess(res.session);
+      setLoginUserId('');
+      setLoginPassword('');
+    } else {
+      setLoginError(res.message || 'Invalid User ID or Password.');
     }
   };
 
@@ -405,14 +360,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                     Password
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleQuickFill}
-                    className="text-xs font-medium text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
+                  <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
                     <KeyRound className="w-3.5 h-3.5" />
-                    Fill Default Password
-                  </button>
+                    Password is private
+                  </span>
                 </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -439,18 +390,11 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               {/* Default Credentials Callout Bar */}
               <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
                 <div>
-                  <div className="font-semibold text-slate-800">Pre-Configured Credentials</div>
+                  <div className="font-semibold text-slate-800">Server-Side Credentials</div>
                   <div className="text-slate-500 mt-0.5">
-                    User: <strong className="text-slate-800 font-mono">{currentCreds.userId || 'Not configured'}</strong> · Pass: <strong className="text-slate-800 font-mono">{currentCreds.passwordHash ? 'Configured' : 'Not configured'}</strong>
+                    User ID and password are checked securely by Vercel.
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleQuickFill}
-                  className="px-3 py-1.5 bg-white border border-slate-300 hover:border-emerald-500 hover:text-emerald-700 rounded-lg text-xs font-semibold text-slate-700 transition-colors shadow-2xs cursor-pointer"
-                >
-                  1-Click Fill
-                </button>
               </div>
 
               {/* Submit Button */}
@@ -926,83 +870,19 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       {/* ----------------------------------------------------------- */}
       {activeAdminTab === 'security' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Change Credentials Form */}
+          {/* Left: Server-side credential settings */}
           <div className="lg:col-span-6 bg-white rounded-2xl border border-slate-200 shadow-2xs p-6">
             <div className="flex items-center gap-2.5 mb-4 text-slate-900 font-bold text-base">
               <KeyRound className="w-5 h-5 text-emerald-600" />
-              <span>Update Admin User ID & Password</span>
+              <span>Admin Login Security</span>
             </div>
-            <p className="text-xs text-slate-500 mb-5">
-              Change the credentials required to log into this Admin Dashboard.
+            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
+              Your login is verified by a Vercel server function. The user ID and password are kept in the Vercel project environment and are not sent to the browser or stored in local browser data.
             </p>
-
-            {credsSuccessMsg && (
-              <div className="mb-4 p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-semibold text-emerald-900 flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{credsSuccessMsg}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSaveCredentials} className="space-y-4 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Manager Display Name
-                </label>
-                <input
-                  type="text"
-                  value={newDisplayName}
-                  onChange={(e) => setNewDisplayName(e.target.value)}
-                  placeholder="e.g. Mess Manager"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Admin User ID (Login Username)
-                </label>
-                <input
-                  type="text"
-                  value={newUserId}
-                  onChange={(e) => setNewUserId(e.target.value)}
-                  placeholder="e.g. admin or manager"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-hidden font-mono"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  New Admin Password
-                </label>
-                <input
-                  type="text"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-hidden font-mono"
-                  required
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-between">
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>Save New Credentials</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleResetCredsToDefault}
-                  className="text-xs text-slate-500 hover:text-rose-600 hover:underline cursor-pointer"
-                >
-                  Reset to Environment Values
-                </button>
-              </div>
-            </form>
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900">
+              <div className="font-semibold">Signed in as {adminSession?.userId || 'Admin'}</div>
+              <div className="mt-1">To change your credentials, update VITE_ADMIN_USER_ID and VITE_ADMIN_PASSWORD in Vercel project settings, then redeploy. The API reads these values server-side.</div>
+            </div>
           </div>
 
           {/* Right: Security & Audit Activity Logs */}
@@ -1136,3 +1016,4 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     </div>
   );
 };
+

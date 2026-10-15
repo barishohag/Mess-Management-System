@@ -1,89 +1,64 @@
 import { AdminCredentials, AdminSession, AdminAuditLog } from '../types';
 
 const ADMIN_CREDS_KEY = 'mess_admin_creds_github_v1';
-// A new key clears sessions created before the app-wide login gate was added.
-const ADMIN_SESSION_KEY = 'mess_admin_session_github_v1';
 const ADMIN_LOGS_KEY = 'mess_admin_audit_logs_v1';
 
 export const DEFAULT_ADMIN_CREDENTIALS: AdminCredentials = {
-  userId: import.meta.env.VITE_ADMIN_USER_ID || '',
-  passwordHash: import.meta.env.VITE_ADMIN_PASSWORD || '',
+  userId: '',
+  passwordHash: '',
   displayName: 'Mess Manager (Admin)',
   email: 'admin@messmanager.local',
   role: 'Super Admin',
   updatedAt: new Date().toISOString()
 };
 
+// Credentials are configured as Vercel server environment variables and never stored in the browser.
 export function getAdminCredentials(): AdminCredentials {
-  const saved = localStorage.getItem(ADMIN_CREDS_KEY);
-  if (saved) {
-    try {
-      return JSON.parse(saved);
-    } catch (e) {
-      console.error('Failed to parse admin credentials:', e);
-    }
-  }
+  localStorage.removeItem(ADMIN_CREDS_KEY);
   return DEFAULT_ADMIN_CREDENTIALS;
 }
 
-export function saveAdminCredentials(creds: AdminCredentials): void {
-  localStorage.setItem(ADMIN_CREDS_KEY, JSON.stringify(creds));
-  logAdminAction('Update Admin Credentials', `User ID or password updated for ${creds.userId}`);
+export function saveAdminCredentials(_creds: AdminCredentials): void {
+  localStorage.removeItem(ADMIN_CREDS_KEY);
 }
 
-export function getAdminSession(): AdminSession | null {
-  const saved = localStorage.getItem(ADMIN_SESSION_KEY);
-  if (saved) {
-    try {
-      const parsed: AdminSession = JSON.parse(saved);
-      if (parsed && parsed.isLoggedIn) {
-        return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse admin session:', e);
-    }
+export async function getAdminSession(): Promise<AdminSession | null> {
+  localStorage.removeItem(ADMIN_CREDS_KEY);
+  localStorage.removeItem('mess_admin_session_github_v1');
+  try {
+    const response = await fetch('/api/auth', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) return null;
+    const result = await response.json();
+    return result.session || null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
-export function loginAdmin(userIdInput: string, passwordInput: string): { success: boolean; message?: string; session?: AdminSession } {
-  const trimmedUser = userIdInput.trim().toLowerCase();
-  const trimmedPass = passwordInput.trim();
-
-  const creds = getAdminCredentials();
-
-  if (!creds.userId || !creds.passwordHash) {
-    return {
-      success: false,
-      message: 'Configure VITE_ADMIN_USER_ID and VITE_ADMIN_PASSWORD before building the app.'
-    };
+export async function loginAdmin(userIdInput: string, passwordInput: string): Promise<{ success: boolean; message?: string; session?: AdminSession }> {
+  try {
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: userIdInput.trim(), password: passwordInput })
+    });
+    const result = await response.json();
+    if (!response.ok) return { success: false, message: result.message || 'Invalid User ID or Password.' };
+    logAdminAction('Admin Login', `Logged in successfully as ${result.session.userId}`);
+    return { success: true, session: result.session };
+  } catch {
+    return { success: false, message: 'Unable to contact the secure sign-in service. Try again.' };
   }
-
-  if (trimmedUser === creds.userId.trim().toLowerCase() && trimmedPass === creds.passwordHash) {
-    const session: AdminSession = {
-      isLoggedIn: true,
-      userId: creds.userId,
-      displayName: creds.displayName,
-      role: creds.role,
-      loginTime: new Date().toISOString()
-    };
-    localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
-    logAdminAction('Admin Login', `Logged in successfully as ${creds.userId}`);
-    return { success: true, session };
-  }
-
-  return { 
-    success: false, 
-    message: 'Invalid User ID or Password. Check your credentials.'
-  };
 }
 
-export function logoutAdmin(): void {
-  const session = getAdminSession();
-  if (session) {
-    logAdminAction('Admin Logout', `Session ended for ${session.userId}`);
+export async function logoutAdmin(): Promise<void> {
+  const session = await getAdminSession();
+  try {
+    await fetch('/api/auth', { method: 'DELETE', credentials: 'same-origin' });
+  } finally {
+    if (session) logAdminAction('Admin Logout', `Session ended for ${session.userId}`);
   }
-  localStorage.removeItem(ADMIN_SESSION_KEY);
 }
 
 export function getAdminLogs(): AdminAuditLog[] {
@@ -107,15 +82,14 @@ export function getAdminLogs(): AdminAuditLog[] {
 }
 
 export function logAdminAction(action: string, details: string): void {
-  const session = getAdminSession();
   const logs = getAdminLogs();
   const newLog: AdminAuditLog = {
     id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     timestamp: new Date().toISOString(),
     action,
     details,
-    performedBy: session ? session.userId : 'Anonymous / System'
+    performedBy: 'Admin / System'
   };
-  const updatedLogs = [newLog, ...logs].slice(0, 50); // keep last 50
-  localStorage.setItem(ADMIN_LOGS_KEY, JSON.stringify(updatedLogs));
+  localStorage.setItem(ADMIN_LOGS_KEY, JSON.stringify([newLog, ...logs].slice(0, 50)));
 }
+

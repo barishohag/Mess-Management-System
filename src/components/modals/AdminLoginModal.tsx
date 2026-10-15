@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, ShieldCheck, Lock, User, Eye, EyeOff, KeyRound, AlertCircle } from 'lucide-react';
-import { loginAdmin, getAdminCredentials } from '../../utils/adminAuth';
+import { X, ShieldCheck, Lock, User, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { loginAdmin } from '../../utils/adminAuth';
 import { AdminSession } from '../../types';
 
 interface AdminLoginModalProps {
@@ -22,14 +22,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleQuickFill = () => {
-    const creds = getAdminCredentials();
-    setUserId(creds.userId);
-    setPassword(creds.passwordHash);
-    setErrorMsg('');
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -43,17 +36,14 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      const res = loginAdmin(userId, password);
-      setIsLoading(false);
-
-      if (res.success && res.session) {
-        onLoginSuccess(res.session);
-        onClose();
-      } else {
-        setErrorMsg(res.message || 'Invalid User ID or Password.');
-      }
-    }, 200);
+    const res = await loginAdmin(userId, password);
+    setIsLoading(false);
+    if (res.success && res.session) {
+      onLoginSuccess(res.session);
+      onClose();
+    } else {
+      setErrorMsg(res.message || 'Invalid User ID or Password.');
+    }
   };
 
   return (
@@ -113,14 +103,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
                 Password
               </label>
-              <button
-                type="button"
-                onClick={handleQuickFill}
-                className="text-[11px] font-medium text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-1"
-              >
-                <KeyRound className="w-3 h-3" />
-                Fill Default
-              </button>
             </div>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -164,3 +146,4 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     </div>
   );
 };
+
