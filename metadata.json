@@ -1,0 +1,6 @@
+{
+  "name": "Mess Meal Management System",
+  "description": "Automated meal tracking, bazaar expense accounting, and member balance settlement console for student and bachelor messes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
