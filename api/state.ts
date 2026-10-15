@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { neon } from '@neondatabase/serverless';
-import { readAdminSession } from './auth';
+import { readAdminSession } from './auth.js';
 
 const STATE_ID = 'main-ledger';
 
